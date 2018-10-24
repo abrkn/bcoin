@@ -67,6 +67,20 @@ function parseScriptTest(data) {
 }
 
 describe('Script', function() {
+  it('isCriticalHashCommit', () => {
+    const hex = '6a24d16173684273f4fda0dee0a38edd067d5c7deea527e627e8b59f98595cee1545fcc3824300bf00010100';
+    const decoded = Script.fromRaw(hex, 'hex');
+    assert(decoded.isCriticalHashCommit());
+  });
+
+  it('getCriticalData', () => {
+    const hex = '6a24d16173684273f4fda0dee0a38edd067d5c7deea527e627e8b59f98595cee1545fcc3824300bf00010100';
+    const decoded = Script.fromRaw(hex, 'hex');
+    const criticalData = decoded.getCriticalData();
+    console.log(criticalData);
+    assert();
+  });
+
   it('should recognize a P2SH output', () => {
     const hex = 'a91419a7d869032368fd1f1e26e5e73a4ad0e474960e87';
     const decoded = Script.fromRaw(hex, 'hex');
