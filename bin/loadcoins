@@ -1,0 +1,345 @@
+#!/usr/bin/env node
+
+'use strict';
+
+// https://www.blockchain.com/btc/tx/033e83e3204b0cc28724e147f6fd140529b2537249f9c61c9de9972750030000
+// first coin ^^^^
+
+const assert = require('assert');
+const ChainDB = require('../lib/blockchain/chain');
+const { createReadStream } = require('fs');
+const Script = require('../lib/script/script');
+const { decompressKey, COMPRESS_TYPES, EMPTY_BUFFER } = require('../lib/coins/compress');
+const consensus = require('../lib/protocol/consensus');
+
+// const node = new FullNode({
+//   file: true,
+//   argv: true,
+//   env: true,
+//   logFile: true,
+//   logConsole: true,
+//   logLevel: 'debug',
+//   memory: false,
+//   workers: true,
+//   listen: true,
+//   loader: require
+// });
+
+function decompressScript(script, br) {
+  // Decompress the script.
+  switch (br.readU8()) {
+    case 0: {
+      const hash = br.readBytes(20, true);
+      script.fromPubkeyhash(hash);
+      break;
+    }
+    case 1: {
+      const hash = br.readBytes(20, true);
+      script.fromScripthash(hash);
+      break;
+    }
+    case 2:
+    case 3:
+    case 4:
+    case 5: {
+      br.offset -= 1;
+      const data = br.readBytes(33, true);
+      // Decompress the key. If this fails,
+      // we have database corruption!
+      const key = decompressKey(data);
+      script.fromPubkey(key);
+      break;
+    }
+    default: {
+      br.offset -= 1;
+      const size = br.readVarInt() - COMPRESS_TYPES;
+      if (size > consensus.MAX_SCRIPT_SIZE) {
+        // This violates consensus rules.
+        // We don't need to read it.
+        script.fromNulldata(EMPTY_BUFFER);
+        br.seek(size);
+      } else {
+        const data = br.readBytes(size);
+        script.fromRaw(data);
+      }
+      break;
+    }
+  }
+
+  return script;
+}
+
+function readVarint(data, off) {
+  let value, size;
+
+  // checkRead(off < data.length, off);
+
+  switch (data[off]) {
+    case 0xff:
+      size = 9;
+      // checkRead(off + size <= data.length, off);
+      throw new Error('too big');
+      // value = data.readU64LE(data, off + 1);
+      // check(value > 0xffffffff, off, 'Non-canonical varint');
+      break;
+    case 0xfe:
+      size = 5;
+      // checkRead(off + size <= data.length, off);
+      value = data.readUInt32LE(data, off + 1);
+      // check(value > 0xffff, off, 'Non-canonical varint');
+      break;
+    case 0xfd:
+      size = 3;
+      // checkRead(off + size <= data.length, off);
+      value = data.readUInt16LE(data, off + 1);
+      // check(value >= 0xfd, off, 'Non-canonical varint');
+      break;
+    default:
+      size = 1;
+      value = data[off];
+      break;
+  }
+
+  return { size, value };
+}
+
+function decompressValue(value) {
+  if (value === 0)
+    return 0;
+
+  value--;
+
+  let exp = value % 10;
+
+  value = (value - exp) / 10;
+
+  let n;
+  if (exp < 9) {
+    const last = value % 9;
+    value = (value - last) / 9;
+    n = value * 10 + last + 1;
+  } else {
+    n = value + 1;
+  }
+
+  while (exp > 0) {
+    n *= 10;
+    exp--;
+  }
+
+  return n;
+}
+
+function readUInt64LE(data, off) {
+  const hi = data.readUInt32LE(data, off + 4);
+  const lo = data.readUInt32LE(data, off);
+  assert((hi & 0xffe00000) === 0, off, 'Number exceeds 2^53-1');
+  return hi * 0x100000000 + lo;
+}
+
+process.on('unhandledRejection', (err, promise) => {
+  throw err;
+});
+
+process.on('SIGINT', async () => {
+});
+
+
+const createReader = () => {
+  const reader = {};
+
+  reader.buffer = null;
+  reader.offset = 0;
+
+  reader.appendBuffer = (buffer) => {
+    reader.buffer = reader.buffer ? Buffer.concat([reader.buffer, buffer]) : buffer;
+  };
+
+  reader.read32 = () => {
+    const result = reader.buffer.readInt32LE(reader.offset);
+    reader.offset += 4;
+    return result;
+  };
+
+  // reader.readVarInt = () => {
+  //   const { size, value } = readVarint(reader.buffer, reader.offset);
+  //   reader.offset += size;
+  //   return value;
+  // };
+
+  reader.readHeader = () => {
+    return {
+      versionRequired: reader.read32(),
+      versionThatWrote: reader.read32(),
+      coinCount: reader.read32(),
+    };
+  };
+
+  reader.readU8 = () => {
+    const value = reader.buffer[reader.offset];
+    reader.offset += 1;
+    return value;
+  };
+
+  reader.readBool = () => {
+    const temp = reader.readU8();
+    return (temp & 1) === 1;
+  };
+
+  reader.readBytes = (length) => {
+    const result = reader.buffer.slice(reader.offset, reader.offset + length);
+    reader.offset += length;
+    return result;
+  };
+
+  reader.readVarInt = () => {
+    let num = 0;
+    let size = 0;
+  
+    for (;;) {
+      // checkRead(off < data.length, off);
+  
+      const ch = reader.buffer[reader.offset++];
+      size += 1;
+  
+      // Number.MAX_SAFE_INTEGER >>> 7
+      assert(num <= 0x3fffffffffff - (ch & 0x7f), reader.offset, 'Number exceeds 2^53-1');
+  
+      // num = (num << 7) | (ch & 0x7f);
+      num = (num * 0x80) + (ch & 0x7f);
+  
+      if ((ch & 0x80) === 0)
+        break;
+  
+      assert(num !== Number.MAX_SAFE_INTEGER, reader.offset, 'Number exceeds 2^53-1');
+      num += 1;
+    }
+
+    return num;
+  };
+
+  reader.readUInt64LE = () => {
+    const result = readUInt64LE(reader.buffer, reader.offset);
+    reader.offset += 8;
+    return result;
+  };
+
+  reader.readLoadedCoin = () => {
+    // uint32_t code = 0;
+    // ::Unserialize(s, VARINT(code));
+    // nHeight = code >> 1;
+    // fCoinBase = code & 1;
+    const code = reader.readVarInt();
+    const height = code >> 1;
+    const coinbase = code & 1;
+    console.log({ code, height, coinbase });
+
+    // ::Unserialize(s, fCriticalData); (bool, 1 byte)
+    const criticalData = reader.readBool();
+    console.log({ criticalData });
+
+    // ::Unserialize(s, VARINT(nSidechain));
+    const sidechainN = reader.readVarInt();
+    console.log({ sidechainN });
+
+    // ::Unserialize(s, VARINT(nPrevBlockRef));
+    const prevBlockRef = reader.readVarInt();
+    console.log({ prevBlockRef });
+
+    // ::Unserialize(s, hashCritical);
+    // 32 bytes
+    const hashCritical = reader.readBytes(32);
+    console.log({ hashCritical });
+
+    // ::Unserialize(s, REF(CTxOutCompressor(out)));
+    // uint64_t nVal = 0;
+    // READWRITE(VARINT(nVal));
+    const valueCompressed = reader.readVarInt();
+    console.log({ valueCompressed });
+    
+    // txout.nValue = DecompressAmount(nVal); <-- uint64
+    const value = decompressValue(valueCompressed);
+    console.log({ value });
+
+    // CScriptCompressor cscript(REF(txout.scriptPubKey));
+    // READWRITE(cscript);
+    const script = new Script();
+    decompressScript(script, reader);
+
+    console.log(script);
+  };
+
+  return reader;
+};
+
+(async () => {
+  const options = {};
+  const db = new ChainDB(options);
+  await db.open();
+
+  console.log(db);
+
+  const stream = createReadStream(__dirname + '/../loaded_coins.dat');
+  const reader = createReader();
+
+  let header;
+
+  function readLoadedCoin(offset) {
+    const { size: codeSize, value: code } = readVarint(buffer, offset);
+    offset += codeSize;
+
+    console.log({ codeSize, code });
+
+    const height = code >> 1;
+    const coinBase = code & 1;
+    console.log({ height, coinBase });
+
+    // TODO: fCriticalData
+    offset++;
+
+    const { size: sidechainSize, value: sidechain } = readVarint(buffer, offset);
+    offset += sidechainSize;
+    console.log({ sidechainSize, sidechain });
+    
+    const { size: prevBlockRefSize, value: prevBlockRef } = readVarint(buffer, offset);
+    offset += prevBlockRefSize;
+    console.log({ prevBlockRefSize, prevBlockRef });
+
+    // console.log(buffer[offset]);
+    // const hasCriticalData =  buffer[offset] >> 1;
+    // buffer[offset] = buffer[offset] & 1;
+    // offset++;
+
+    const hashCritical = buffer.slice(offset, offset + 4);
+    offset += 4;
+    console.log({ hashCritical });
+
+    const compressedValue = readUInt64LE(buffer, offset);
+    offset += 8;
+    console.log({ compressedValue });
+
+    const value = decompressValue(compressedValue);
+    console.log({ value });
+
+    // TODO: CScriptCompressor cscript(REF(txout.scriptPubKey));
+    // const { scriptSize = readVarint(buffer, offset);
+
+    process.exit(1);
+  }
+
+  stream.on('data', (data) => {
+    reader.appendBuffer(data);
+    header = reader.readHeader();
+    console.log({ header });
+    reader.readLoadedCoin();
+    console.log('-------------------');
+    reader.offset += 0;
+    reader.readLoadedCoin();
+    process.exit(1);
+  });
+
+  console.log('EOI');
+})().catch((err) => {
+  console.error(err.stack);
+  process.exit(1);
+});
