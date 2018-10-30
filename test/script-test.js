@@ -77,7 +77,19 @@ describe('Script', function() {
     const hex = '6a24d16173684273f4fda0dee0a38edd067d5c7deea527e627e8b59f98595cee1545fcc3824300bf00010100';
     const decoded = Script.fromRaw(hex, 'hex');
     const criticalData = decoded.getCriticalData();
-    console.log(criticalData);
+    // console.log(criticalData);
+    // assert();
+  });
+
+  it('Critical no its not', () => {
+    return;
+    const hex = '030000003f000102ba6b3d80d2b445ca39fd3bc86e91bae2c1aa6541de4abc0a7b53237cc36c44c200000000171600141e893c049ed1be8f77ce11571dd0b94d26dabf5cfeffffffba6b3d80d2b445ca39fd3bc86e91bae2c1aa6541de4abc0a7b53237cc36c44c2020000006b483045022100bfdfc132e7584201c4c568850fd1bf0bf950baf9c520a78969155da2d12b393c0220766f462e2abc08ea05068cc8952a751acdce992bf8548e15fc4a727aa9364de10121028c43630c9bd8072758e6cfaab61e6605eac4408754a053975555fb6c86ed6160feffffff030000000000000000176a00147a3c9408d5902b5da1b0e0dc6adaf89a3f5a4482707d94230000000017a914624a69b27a0d33f5693b7819fab4b6250412f5a58770f87f02e90100001976a914d9c0818d6e69fdb64ccd1968788ad73c4cb490f788ac02483045022100c94da96abcc3c074027eb59b798ec3b895c07c59b9ab8b67554a01e98a53af4702203474e70c55336e79a0e741393a9946b43cd2b48ad4fdd9f5f1b30a94d8e83de4012102e8f8d521f2ebe7ec6d6293f209521c7769acf4aa5e63ecc71bfcc5ebed8bae65000c1a0000';
+
+    // const tx = TX.fromJSON(hex);
+
+    const decoded = Script.fromRaw(hex, 'hex');
+    // const criticalData = decoded.getCriticalData();
+    console.log(decoded);
     assert();
   });
 
