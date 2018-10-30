@@ -5,6 +5,12 @@
 // https://www.blockchain.com/btc/tx/033e83e3204b0cc28724e147f6fd140529b2537249f9c61c9de9972750030000
 // first coin ^^^^
 
+// https://www.blockchain.com/btc/tx/4aa1defd46f10c27ff4d6c2565e1e0e611429cd673b0f7342f30820690030000
+// second coin ^^^^
+
+// https://www.blockchain.com/btc/tx/e1c9467a885a156e56a29d9c854e65674d581ad75611b02290454b4862060000
+// third coin ^^^
+
 const assert = require('assert');
 const ChainDB = require('../lib/blockchain/chain');
 const { createReadStream } = require('fs');
@@ -27,7 +33,10 @@ const consensus = require('../lib/protocol/consensus');
 
 function decompressScript(script, br) {
   // Decompress the script.
-  switch (br.readU8()) {
+  const kind = br.readU8();
+  false && console.log('CASE', kind);
+
+  switch (kind) {
     case 0: {
       const hash = br.readBytes(20, true);
       script.fromPubkeyhash(hash);
@@ -152,11 +161,24 @@ const createReader = () => {
   reader.offset = 0;
 
   reader.appendBuffer = (buffer) => {
+    assert(buffer);
+
+    if (reader.offset > 0) {
+      reader.buffer = reader.buffer.slice(reader.offset);
+      reader.offset = 0;
+    }
+
     reader.buffer = reader.buffer ? Buffer.concat([reader.buffer, buffer]) : buffer;
   };
 
   reader.read32 = () => {
     const result = reader.buffer.readInt32LE(reader.offset);
+    reader.offset += 4;
+    return result;
+  };
+
+  reader.readU32 = () => {
+    const result = reader.buffer.readUInt32LE(reader.offset);
     reader.offset += 4;
     return result;
   };
@@ -231,42 +253,46 @@ const createReader = () => {
     // fCoinBase = code & 1;
     const code = reader.readVarInt();
     const height = code >> 1;
+    assert(height > 0);
     const coinbase = code & 1;
-    console.log({ code, height, coinbase });
+    false && console.log({ code, height, coinbase });
 
     // ::Unserialize(s, fCriticalData); (bool, 1 byte)
     const criticalData = reader.readBool();
-    console.log({ criticalData });
+    false && console.log({ criticalData });
 
     // ::Unserialize(s, VARINT(nSidechain));
     const sidechainN = reader.readVarInt();
-    console.log({ sidechainN });
+    false && console.log({ sidechainN });
 
     // ::Unserialize(s, VARINT(nPrevBlockRef));
     const prevBlockRef = reader.readVarInt();
-    console.log({ prevBlockRef });
+    false && console.log({ prevBlockRef });
 
     // ::Unserialize(s, hashCritical);
     // 32 bytes
     const hashCritical = reader.readBytes(32);
-    console.log({ hashCritical });
+    false && console.log({ hashCritical });
 
     // ::Unserialize(s, REF(CTxOutCompressor(out)));
     // uint64_t nVal = 0;
     // READWRITE(VARINT(nVal));
     const valueCompressed = reader.readVarInt();
-    console.log({ valueCompressed });
+    false && console.log({ valueCompressed });
     
     // txout.nValue = DecompressAmount(nVal); <-- uint64
     const value = decompressValue(valueCompressed);
-    console.log({ value });
+    false && console.log({ value });
 
     // CScriptCompressor cscript(REF(txout.scriptPubKey));
     // READWRITE(cscript);
     const script = new Script();
     decompressScript(script, reader);
+    false && console.log(script);
 
-    console.log(script);
+    const outpointHash = reader.readBytes(32);
+    const outpointN = reader.readU32();
+    false && console.log({ outpointHash, outpointN });
   };
 
   return reader;
@@ -277,68 +303,55 @@ const createReader = () => {
   const db = new ChainDB(options);
   await db.open();
 
-  console.log(db);
+  false && console.log(db);
 
-  const stream = createReadStream(__dirname + '/../loaded_coins.dat');
+  const stream = createReadStream(__dirname + '/../loaded_coins.dat', {
+    highWaterMark: 1024 * 1024
+  });
+
   const reader = createReader();
 
   let header;
 
-  function readLoadedCoin(offset) {
-    const { size: codeSize, value: code } = readVarint(buffer, offset);
-    offset += codeSize;
-
-    console.log({ codeSize, code });
-
-    const height = code >> 1;
-    const coinBase = code & 1;
-    console.log({ height, coinBase });
-
-    // TODO: fCriticalData
-    offset++;
-
-    const { size: sidechainSize, value: sidechain } = readVarint(buffer, offset);
-    offset += sidechainSize;
-    console.log({ sidechainSize, sidechain });
-    
-    const { size: prevBlockRefSize, value: prevBlockRef } = readVarint(buffer, offset);
-    offset += prevBlockRefSize;
-    console.log({ prevBlockRefSize, prevBlockRef });
-
-    // console.log(buffer[offset]);
-    // const hasCriticalData =  buffer[offset] >> 1;
-    // buffer[offset] = buffer[offset] & 1;
-    // offset++;
-
-    const hashCritical = buffer.slice(offset, offset + 4);
-    offset += 4;
-    console.log({ hashCritical });
-
-    const compressedValue = readUInt64LE(buffer, offset);
-    offset += 8;
-    console.log({ compressedValue });
-
-    const value = decompressValue(compressedValue);
-    console.log({ value });
-
-    // TODO: CScriptCompressor cscript(REF(txout.scriptPubKey));
-    // const { scriptSize = readVarint(buffer, offset);
-
-    process.exit(1);
-  }
+  let coinIndex = 0;
 
   stream.on('data', (data) => {
+    false && console.log('data len', data.length);
     reader.appendBuffer(data);
+
+    if (!header) {
     header = reader.readHeader();
-    console.log({ header });
-    reader.readLoadedCoin();
-    console.log('-------------------');
-    reader.offset += 0;
-    reader.readLoadedCoin();
-    process.exit(1);
+    false && console.log({ header });
+    }
+
+    while (reader.buffer.length - reader.offset > 1024 * 10) {
+      false && console.log('- - - - - - - - - - - - - - - - - - - -');
+      reader.readLoadedCoin();
+
+      coinIndex++;
+
+      if (coinIndex % 1e6 === 0) {
+        console.log('Read', coinIndex / 1e6, 'M');
+      }
+    }
   });
 
-  console.log('EOI');
+  stream.on('end', (data) => {
+    reader.appendBuffer(data);
+
+    while (reader.buffer.length - reader.offset > 1024 * 10) {
+      false && console.log('- - - - - - - - - - - - - - - - - - - -');
+      reader.readLoadedCoin();
+
+      coinIndex++;
+
+      if (coinIndex % 100 === 0) {
+        console.log({ coinIndex });
+      }
+    }
+  });
+
+  false && console.log('EOI');
 })().catch((err) => {
   console.error(err.stack);
   process.exit(1);
