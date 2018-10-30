@@ -34,6 +34,7 @@ const tx4 = common.readTX('tx4');
 const tx5 = common.readTX('tx5');
 const tx6 = common.readTX('tx6');
 const tx7 = common.readTX('tx7');
+const txdn11 = common.readTX('tx-dn-1-1');
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
 const MAX_SAFE_ADDITION = 0xfffffffffffff;
@@ -1110,5 +1111,26 @@ describe('TX', function() {
     const value2 = mtx2.getInputValue();
 
     assert.strictEqual(value1, value2);
+  });
+
+  it('should parse Drivenet block 1, tx 0', () => {
+    // txid: 13a31f4492a344692d64d8bacbf903856eb7b9a55d16a787c0bc61f05b2479a9
+    TX.spam = true;
+
+    const [tx] = txdn11.getTX();
+
+    assert.equal(tx.version, 3);
+    assert.equal(tx.replayBytes, 63);
+    // assert.equal(tx.txid(), '13a31f4492a344692d64d8bacbf903856eb7b9a55d16a787c0bc61f05b2479a9');
+    // assert.equal(tx.hash('hex'), 'ad097bc33fc38537883105066888b761fd42cc6c0a0d0a2f94c127fdac47c166');
+    assert.equal(tx.criticalData, null);
+    assert.equal(tx.locktime, 0);
+
+    tx.refresh();
+    const serialized = tx.toRaw();
+
+    assert.equal(serialized.toString('hex'), txdn11.raw.toString('hex'));
+
+    TX.spam = false;
   });
 });
