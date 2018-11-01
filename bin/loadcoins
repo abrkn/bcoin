@@ -12,11 +12,29 @@
 // third coin ^^^
 
 const assert = require('assert');
-const ChainDB = require('../lib/blockchain/chain');
+const bdb = require('bdb');
+// const ChainDB = require('../lib/blockchain/chaindb');
 const { createReadStream } = require('fs');
 const Script = require('../lib/script/script');
 const { decompressKey, COMPRESS_TYPES, EMPTY_BUFFER } = require('../lib/coins/compress');
 const consensus = require('../lib/protocol/consensus');
+const Coin = require('../lib/primitives/coin');
+const CoinEntry = require('../lib/coins/coinentry');
+
+function write(data, hash, off) {
+  assert(Buffer.isBuffer(hash));
+  return hash.copy(data, off);
+}
+
+function bpair(prefix, hash, index) {
+  const key = Buffer.allocUnsafe(37);
+  if (typeof prefix === 'string')
+    prefix = prefix.charCodeAt(0);
+  key[0] = prefix;
+  write(key, hash, 1);
+  key.writeUInt32BE(index, 33, true);
+  return key;
+}
 
 // const node = new FullNode({
 //   file: true,
@@ -293,20 +311,47 @@ const createReader = () => {
     const outpointHash = reader.readBytes(32);
     const outpointN = reader.readU32();
     false && console.log({ outpointHash, outpointN });
+
+    const item = new CoinEntry();
+    item.version = 1, // TODO: ?
+    item.height = height;
+    item.coinbase = coinbase;
+    item.output.script = script;
+    item.output.value = value;
+    item.spent = false;
+    item.raw = null;
+
+    return { item, hash: outpointHash, index: outpointN };
+
+    // return Coin.fromOptions({
+    //   version: 1, // TODO: ?
+    //   height,
+    //   value,
+    //   script,
+    //   hash: outpointHash,
+    //   index: outpointN
+    // });
   };
 
   return reader;
 };
 
 (async () => {
-  const options = {};
-  const db = new ChainDB(options);
+  // const options = {};
+  // const db = new ChainDB(options);
+  const db = bdb.create({
+    location: '/Users/andreas/.bcoin/chain',
+    compression: true,
+    cacheSize: 32 << 20,
+    // createIfMissing: false
+  });
+  
   await db.open();
 
   false && console.log(db);
 
   const stream = createReadStream(__dirname + '/../loaded_coins.dat', {
-    highWaterMark: 1024 * 1024
+    highWaterMark: 1024 * 1024 * 100
   });
 
   const reader = createReader();
@@ -315,18 +360,15 @@ const createReader = () => {
 
   let coinIndex = 0;
 
-  stream.on('data', (data) => {
-    false && console.log('data len', data.length);
-    reader.appendBuffer(data);
+  const writeCoinsWithBatch = async (finish) => {
+    const batch = db.batch();
 
-    if (!header) {
-    header = reader.readHeader();
-    false && console.log({ header });
-    }
-
-    while (reader.buffer.length - reader.offset > 1024 * 10) {
-      false && console.log('- - - - - - - - - - - - - - - - - - - -');
-      reader.readLoadedCoin();
+    while (
+      (finish && reader.offset < reader.buffer.length) ||
+      (!finish && reader.buffer.length - reader.offset > 1024 * 10)
+    ) {
+      const { item, hash, index } = reader.readLoadedCoin();
+      batch.put(bpair('c', hash, index), item.toRaw());
 
       coinIndex++;
 
@@ -334,21 +376,32 @@ const createReader = () => {
         console.log('Read', coinIndex / 1e6, 'M');
       }
     }
+
+    await batch.write();
+  };
+
+  stream.on('data', (data) => {
+    stream.pause();
+
+    reader.appendBuffer(data);
+
+    if (!header) {
+      header = reader.readHeader();
+      false && console.log({ header });
+    }
+
+    writeCoinsWithBatch().then(() => {
+      stream.resume();
+    });
   });
 
   stream.on('end', (data) => {
-    reader.appendBuffer(data);
+    console.log('FIN!');
 
-    while (reader.buffer.length - reader.offset > 1024 * 10) {
-      false && console.log('- - - - - - - - - - - - - - - - - - - -');
-      reader.readLoadedCoin();
-
-      coinIndex++;
-
-      if (coinIndex % 100 === 0) {
-        console.log({ coinIndex });
-      }
-    }
+    Promise.resolve(true)
+      .then(() => writeCoinsWithBatch(true))
+      .then(() => db.close())
+      .then(() => process.exit());
   });
 
   false && console.log('EOI');
