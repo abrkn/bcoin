@@ -1159,5 +1159,7 @@ describe('TX', function() {
     const serialized = tx.toRaw();
 
     assert.equal(serialized.toString('hex'), txdn2d4a27.raw.toString('hex'));
+
+    assert.equal(tx.rhash(), '2d4a27a351d54ba1557c5d33337af4e6955d89bd798ec6dab6c0e79f9bf2a84c');
   });
 });
