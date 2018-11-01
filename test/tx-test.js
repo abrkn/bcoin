@@ -35,6 +35,7 @@ const tx5 = common.readTX('tx5');
 const tx6 = common.readTX('tx6');
 const tx7 = common.readTX('tx7');
 const txdn11 = common.readTX('tx-dn-1-1');
+const txdn2d4a27 = common.readTX('txdn2d4a27');
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
 const MAX_SAFE_ADDITION = 0xfffffffffffff;
@@ -1132,5 +1133,31 @@ describe('TX', function() {
     assert.equal(serialized.toString('hex'), txdn11.raw.toString('hex'));
 
     TX.spam = false;
+  });
+
+  it('should parse Drivenet tx 2d4a27', () => {
+    // txid: 2d4a27a351d54ba1557c5d33337af4e6955d89bd798ec6dab6c0e79f9bf2a84c
+    const [tx] = txdn2d4a27.getTX();
+
+    assert.equal(tx.version, 3);
+    assert.equal(tx.replayBytes, 63);
+    // assert.equal(tx.txid(), '13a31f4492a344692d64d8bacbf903856eb7b9a55d16a787c0bc61f05b2479a9');
+    // assert.equal(tx.hash('hex'), 'ad097bc33fc38537883105066888b761fd42cc6c0a0d0a2f94c127fdac47c166');
+    assert.equal(tx.criticalData.bytes.toString('hex'), '00bf000000');
+    assert.equal(tx.locktime, 5066);
+    assert.equal(tx.inputs.length, 1);
+    assert.equal(tx.inputs[0].prevout.hash.toString('hex'), util.revHex(new Buffer('0d38ba800133331ae76e6f66379fa80c9dc259a9db0cb5668e28b76420e12da1', 'hex')));
+    assert.equal(tx.inputs[0].prevout.index, 0);
+    // TODO: more check here
+
+    assert.equal(tx.outputs.length, 2);
+    assert.equal(tx.outputs[0].value, 28.98996204 * 1e8);
+    assert.equal(tx.outputs[1].value, 0.00996320 * 1e8);
+
+    tx.refresh();
+
+    const serialized = tx.toRaw();
+
+    assert.equal(serialized.toString('hex'), txdn2d4a27.raw.toString('hex'));
   });
 });
