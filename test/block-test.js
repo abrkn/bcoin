@@ -8,6 +8,7 @@ const common = require('./util/common');
 const {BloomFilter} = require('bfilter');
 const {BufferMap} = require('buffer-map');
 const Block = require('../lib/primitives/block');
+const TX = require('../lib/primitives/tx');
 const MerkleBlock = require('../lib/primitives/merkleblock');
 const consensus = require('../lib/protocol/consensus');
 const Script = require('../lib/script/script');
@@ -27,6 +28,9 @@ const block426884 = common.readBlock('block426884');
 const compact426884 = common.readCompact('compact426884');
 const block898352 = common.readBlock('block898352');
 const compact898352 = common.readCompact('compact898352');
+
+// Drivenet vectors
+const block5067 = common.readBlock('block5067');
 
 // Sigops counting test vectors
 // Format: [name, sigops, weight]
@@ -373,4 +377,10 @@ describe('Block', function() {
       });
     }
   }
+
+  it('should handle Drivenet-9 block #5067', () => {
+    TX.spam = true;
+    const [block] = block5067.getBlock();
+    block.verify();
+  });
 });
